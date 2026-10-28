@@ -7,6 +7,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Test.HUnit
 import System.IO.Silently (capture_)
+import Test.HUnit (Test(TestLabel))
 
 -- Map é usado para armazenar os identificadores do programa
 -- Funcões utilizadas: Map.empty, Map.insert e Map.lookup
@@ -19,6 +20,7 @@ data Type
   = TInt
   | TBool
   | TVoid
+  | TFloat
   deriving (Show, Eq)
 
 data BinOp
@@ -29,6 +31,7 @@ data BinOp
 
 data Expr
   = Lit   Int
+  | FLit  Double
   | BLit  Bool
   | Var   String
   | BinE  BinOp Expr Expr
@@ -61,6 +64,7 @@ data FunDecl = FunDecl
 data Value
   = VInt  Int
   | VBool Bool
+  | VFloat Double
   | VVoid
   deriving (Show, Eq)
 
@@ -88,6 +92,7 @@ evalExpr fenv env expr = case expr of
 
   Lit  n -> return (VInt n)
   BLit b -> return (VBool b)
+  FLit f -> return (VFloat f)
 
   Var x  -> case Map.lookup x env of
                Nothing -> error ("Variavel nao declarada: " ++ x)
@@ -128,7 +133,8 @@ evalExpr fenv env expr = case expr of
 -- ============================================================
 
 evalBinOp :: BinOp -> Value -> Value -> Value
-evalBinOp Add (VInt  a) (VInt  b) = VInt  (a + b)
+evalBinOp Add (VInt   a) (VInt   b) = VInt   (a + b)
+evalBinOp Add (VFloat a) (VFloat b) = VFloat (a + b)
 evalBinOp Sub (VInt  a) (VInt  b) = VInt  (a - b)
 evalBinOp Mul (VInt  a) (VInt  b) = VInt  (a * b)
 evalBinOp Div (VInt  a) (VInt  b) = VInt  (a `div` b)
@@ -215,6 +221,7 @@ execBlock fenv env (s:ss) = do
 
 showValue :: Value -> String
 showValue (VInt  n) = show n
+showValue (VFloat f) = show f
 showValue (VBool b) = if b then "verdadeiro" else "falso"
 showValue VVoid     = "()"
 
@@ -386,11 +393,17 @@ testImprimeCallDobro = TestCase $ do
   output <- runProgIO fenvExemplo prog8
   assertEqual "imprime dobro(4)" "8\n" output
 
+testSomaFloatSimples :: Test
+testSomaFloatSimples = TestCase $ do
+  let resultado = evalBinOp Add (VFloat 2.5) (VFloat 1.5)
+  assertEqual "soma de 2.5 + 1.5 deve ser 4.0" (VFloat 4.0) resultado
+
 -- suite completa
 
 suite :: Test
 suite = TestList
   [ TestLabel "soma simples"         testSomaSimples
+  , TestLabel "Soma Float Simples"   testSomaFloatSimples
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
