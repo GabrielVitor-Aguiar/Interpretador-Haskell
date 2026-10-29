@@ -39,6 +39,7 @@ data Expr
   | Not   Expr
   | Call  String [Expr]
   | ArrAcc String Expr
+  | ArrayLit [Expr]
   deriving (Show, Eq)
 
 data Stmt
@@ -107,6 +108,10 @@ evalExpr fenv env expr = case expr of
           else error ("Indice fora dos limites do array: " ++ show idx)
       (VArray _, _) -> error "Indice de array deve ser do tipo Int"
       _             -> error ("A variavel " ++ arrName ++ " nao eh um array")
+
+  ArrayLit exprs -> do
+    vals <- mapM (evalExpr fenv env) exprs
+    return (VArray vals)
 
   Var x  -> case Map.lookup x env of
                Nothing -> error ("Variavel nao declarada: " ++ x)
@@ -516,6 +521,16 @@ testAtribuicaoArray = TestCase $ do
       _ -> assertFailure "vetor nao encontrado no ambiente"
     _ -> assertFailure "execucao de ArrAssign retornou Returned em vez de Next"
 
+testDeclEAccArray :: Test
+testDeclEAccArray = TestCase $ do
+  let prog = Block
+        [ Decl (TArray TInt) "vetor" (ArrayLit [Lit 10, Lit 20, Lit 30])
+        , ArrAssign "vetor" (Lit 0) (Lit 99)
+        , Return (ArrAcc "vetor" (Lit 0))
+        ]
+  v <- runProg Map.empty prog
+  assertEqual "declaracao de array e alteracao do indice 0 para 99" (VInt 99) v
+
 -- suite completa
 
 suite :: Test
@@ -528,6 +543,7 @@ suite = TestList
   , TestLabel "comparacao float"     testComparacaoFloat
   , TestLabel "acesso array"         testAcessoArray
   , TestLabel "atribuicao array"     testAtribuicaoArray
+  , TestLabel "declaracao array"     testDeclEAccArray
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
