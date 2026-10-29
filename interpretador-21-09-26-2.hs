@@ -166,9 +166,24 @@ evalBinOp Neq va        vb        = VBool (va /= vb)
 
 -- Operadores Relacionais
 evalBinOp Lt  (VInt   a) (VInt   b) = VBool (a <  b)
+evalBinOp Lt  (VFloat a) (VFloat b) = VBool (a <  b)
+evalBinOp Lt  (VInt   a) (VFloat b) = VBool (fromIntegral a <  b)
+evalBinOp Lt  (VFloat a) (VInt   b) = VBool (a <  fromIntegral b)
+
 evalBinOp Gt  (VInt   a) (VInt   b) = VBool (a >  b)
+evalBinOp Gt  (VFloat a) (VFloat b) = VBool (a >  b)
+evalBinOp Gt  (VInt   a) (VFloat b) = VBool (fromIntegral a >  b)
+evalBinOp Gt  (VFloat a) (VInt   b) = VBool (a >  fromIntegral b)
+
 evalBinOp Le  (VInt   a) (VInt   b) = VBool (a <= b)
+evalBinOp Le  (VFloat a) (VFloat b) = VBool (a <= b)
+evalBinOp Le  (VInt   a) (VFloat b) = VBool (fromIntegral a <= b)
+evalBinOp Le  (VFloat a) (VInt   b) = VBool (a <= fromIntegral b)
+
 evalBinOp Ge  (VInt   a) (VInt   b) = VBool (a >= b)
+evalBinOp Ge  (VFloat a) (VFloat b) = VBool (a >= b)
+evalBinOp Ge  (VInt   a) (VFloat b) = VBool (fromIntegral a >= b)
+evalBinOp Ge  (VFloat a) (VInt   b) = VBool (a >= fromIntegral b)
 
 -- Operadores Lógicos
 evalBinOp And (VBool  a) (VBool  b) = VBool (a && b)
@@ -440,6 +455,13 @@ testDivisaoFloat = TestCase $ do
   let resDiv = evalBinOp Div (VInt 7) (VFloat 2.0)
   assertEqual "7 / 2.0 (float) deve ser 3.5" (VFloat 3.5) resDiv
 
+testComparacaoFloat :: Test
+testComparacaoFloat = TestCase $ do
+  let resLt = evalBinOp Lt (VFloat 2.5) (VFloat 3.0)
+  let resGt = evalBinOp Gt (VFloat 5.5) (VInt 2)
+  assertEqual "2.5 < 3.0 deve ser verdadeiro" (VBool True) resLt
+  assertEqual "5.5 > 2 deve ser verdadeiro" (VBool True) resGt
+
 -- suite completa
 
 suite :: Test
@@ -449,6 +471,7 @@ suite = TestList
   , TestLabel "operacao mista"       testOperacaoMista
   , TestLabel "divisao inteira"      testDivisaoInteira
   , TestLabel "divisao float"        testDivisaoFloat
+  , TestLabel "comparacao float"     testComparacaoFloat
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
