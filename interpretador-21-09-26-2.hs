@@ -94,10 +94,16 @@ data StmtResult
 
 evalExpr :: FunEnv -> Env -> Expr -> IO Value
 evalExpr fenv env expr = case expr of
+  Lit n -> return (VInt n)
 
-  Lit  n -> return (VInt n)
-  BLit b -> return (VBool b)
   FLit f -> return (VFloat f)
+
+  BLit b -> return (VBool b)
+
+  Var x -> case Map.lookup x env of
+    Nothing -> error ("Variavel nao declarada: " ++ x)
+    Just v  -> return v
+
   ArrAcc arrName idxExpr -> do
     vArr <- evalExpr fenv env (Var arrName)
     vIdx <- evalExpr fenv env idxExpr
@@ -113,11 +119,7 @@ evalExpr fenv env expr = case expr of
     vals <- mapM (evalExpr fenv env) exprs
     return (VArray vals)
 
-  Var x  -> case Map.lookup x env of
-               Nothing -> error ("Variavel nao declarada: " ++ x)
-               Just v  -> return v
-
-  Not e  -> do
+  Not e -> do
     v <- evalExpr fenv env e
     case v of
       VBool b -> return (VBool (not b))
@@ -128,24 +130,24 @@ evalExpr fenv env expr = case expr of
     vr <- evalExpr fenv env r
     return (evalBinOp op vl vr)
 
-  Call fname args ->
-    case Map.lookup fname fenv of
-      Nothing  -> error ("Funcao nao declarada: " ++ fname)
-      Just fun -> do
-        let nparams = length (funParams fun)
-            nargs   = length args
-        if nparams /= nargs
-          then error ("Funcao " ++ fname ++ " espera " ++
-                      show nparams ++ " argumentos, recebeu " ++
-                      show nargs)
-          else do
-            vals <- mapM (evalExpr fenv env) args
-            let params   = map snd (funParams fun)
-                envLocal = Map.fromList (zip params vals)
-            result <- execStmt fenv envLocal (funBody fun)
-            case result of
-              Returned v _ -> return v
-              Next _       -> return VVoid
+  Call fname args -> case Map.lookup fname fenv of
+    Nothing  -> error ("Funcao nao declarada: " ++ fname)
+    Just fun -> do
+      let nparams = length (funParams fun)
+          nargs   = length args
+      if nparams /= nargs
+        then error ("Funcao " ++ fname ++ " espera " ++
+                    show nparams ++ " argumentos, recebeu " ++
+                    show nargs)
+        else do
+          vals <- mapM (evalExpr fenv env) args
+          let params   = map snd (funParams fun)
+              envLocal = Map.fromList (zip params vals)
+              envFun   = Map.union envLocal env
+          result <- execStmt fenv envFun (funBody fun)
+          case result of
+            Returned v _ -> return v
+            Next _       -> return VVoid
 
 -- ============================================================
 -- evalBinOp — permanece pura
@@ -555,6 +557,21 @@ testOrdemAvaliacaoArgs = TestCase $ do
   -- Se p1 rodar antes de p2, a saida sera "1\n2\n30\n"
   assertEqual "argumentos de funcao devem ser avaliados da esquerda para a direita" "1\n2\n30\n" output
 
+funLeGlobal :: FunDecl
+funLeGlobal = FunDecl
+  { funName   = "leGlobal"
+  , funParams = []
+  , funBody   = Return (Var "g")
+  }
+
+testAcessoVariavelGlobal :: Test
+testAcessoVariavelGlobal = TestCase $ do
+  let fenv = Map.singleton "leGlobal" funLeGlobal
+  let envGlobal = Map.singleton "g" (VInt 42)
+  -- Chamada leGlobal() em um ambiente onde g = 42
+  v <- evalExpr fenv envGlobal (Call "leGlobal" [])
+  assertEqual "funcao deve conseguir ler a variavel global g" (VInt 42) v
+
 -- suite completa
 
 suite :: Test
@@ -569,6 +586,7 @@ suite = TestList
   , TestLabel "atribuicao array"     testAtribuicaoArray
   , TestLabel "declaracao array"     testDeclEAccArray
   , TestLabel "ordem avaliacao args"  testOrdemAvaliacaoArgs
+  , TestLabel "acesso variavel global" testAcessoVariavelGlobal
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
