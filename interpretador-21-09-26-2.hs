@@ -307,7 +307,6 @@ showValue (VArray xs) = "[" ++ showListValues xs ++ "]"
     showListValues [v]    = showValue v
     showListValues (v:vs) = showValue v ++ ", " ++ showListValues vs
 
-showValue VVoid      = "()"
 showValue VVoid     = "()"
 
 -- ============================================================
@@ -363,11 +362,29 @@ funSoma = FunDecl
   , funBody   = Return (BinE Add (Var "a") (Var "b"))
   }
 
+-- int p1() { imprime(1); retorna 10; }
+funP1 :: FunDecl
+funP1 = FunDecl
+  { funName   = "p1"
+  , funParams = []
+  , funBody   = Block [Print (Lit 1), Return (Lit 10)]
+  }
+
+-- int p2() { imprime(2); retorna 20; }
+funP2 :: FunDecl
+funP2 = FunDecl
+  { funName   = "p2"
+  , funParams = []
+  , funBody   = Block [Print (Lit 2), Return (Lit 20)]
+  }
+
 fenvExemplo :: FunEnv
 fenvExemplo = Map.fromList
   [ ("dobro",    funDobro)
   , ("fatorial", funFatorial)
   , ("soma",     funSoma)
+  , ("p1",       funP1)
+  , ("p2",       funP2)
   ]
 
 -- ============================================================
@@ -531,6 +548,13 @@ testDeclEAccArray = TestCase $ do
   v <- runProg Map.empty prog
   assertEqual "declaracao de array e alteracao do indice 0 para 99" (VInt 99) v
 
+testOrdemAvaliacaoArgs :: Test
+testOrdemAvaliacaoArgs = TestCase $ do
+  let prog = Print (Call "soma" [Call "p1" [], Call "p2" []])
+  output <- runProgIO fenvExemplo prog
+  -- Se p1 rodar antes de p2, a saida sera "1\n2\n30\n"
+  assertEqual "argumentos de funcao devem ser avaliados da esquerda para a direita" "1\n2\n30\n" output
+
 -- suite completa
 
 suite :: Test
@@ -544,6 +568,7 @@ suite = TestList
   , TestLabel "acesso array"         testAcessoArray
   , TestLabel "atribuicao array"     testAtribuicaoArray
   , TestLabel "declaracao array"     testDeclEAccArray
+  , TestLabel "ordem avaliacao args"  testOrdemAvaliacaoArgs
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
