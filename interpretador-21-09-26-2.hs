@@ -8,6 +8,7 @@ import qualified Data.Map as Map
 import Test.HUnit
 import System.IO.Silently (capture_)
 import Test.HUnit (Test(TestLabel))
+import qualified Control.Exception as E
 
 -- Map é usado para armazenar os identificadores do programa
 -- Funcões utilizadas: Map.empty, Map.insert e Map.lookup
@@ -217,6 +218,24 @@ evalBinOp op  _         _         =
 -- Execução de Statements
 -- ============================================================
 
+-- Retorna o tipo estatico correspondente a um Value de runtime
+valueType :: Value -> Type
+valueType (VInt _)    = TInt
+valueType (VFloat _)  = TFloat
+valueType (VBool _)   = TBool
+valueType (VArray _)  = TArray TVoid
+valueType VVoid       = TVoid
+
+-- Converte um valor para o tipo esperado
+coerceValue :: Type -> Value -> Value
+coerceValue TInt   (VInt n)            = VInt n
+coerceValue TInt   (VFloat f)          = VInt (truncate f)
+coerceValue TFloat (VFloat f)          = VFloat f
+coerceValue TFloat (VInt n)            = VFloat (fromIntegral n)
+coerceValue TBool  (VBool b)           = VBool b
+coerceValue (TArray _) (VArray vals)   = VArray vals
+coerceValue targetType val             = error ("Tipos incompativeis: nao eh possivel atribuir " ++ show val ++ " para o tipo " ++ show targetType)
+
 execStmt :: FunEnv -> Env -> Stmt -> IO StmtResult
 execStmt fenv env stmt = case stmt of
 
@@ -228,18 +247,18 @@ execStmt fenv env stmt = case stmt of
     putStrLn (showValue v)
     return (Next env)
 
-  Decl _ x e -> do
+  Decl t x e -> do
     v <- evalExpr fenv env e
-    let env' = Map.insert x v env
-    return (Next env')
+    let vCoerced = coerceValue t v
+    vCoerced `seq` return (Next (Map.insert x vCoerced env))
 
-  Assign x e ->
-    case Map.lookup x env of
-      Nothing -> error ("Variavel nao declarada: " ++ x)
-      Just _  -> do
-        v <- evalExpr fenv env e
-        let env' = Map.insert x v env
-        return (Next env')
+  Assign x e -> case Map.lookup x env of
+    Nothing -> error ("Variavel nao declarada: " ++ x)
+    Just currentVal -> do
+      v <- evalExpr fenv env e
+      let targetType = valueType currentVal
+          vCoerced   = coerceValue targetType v
+      vCoerced `seq` return (Next (Map.insert x vCoerced env))
 
   ArrAssign arrName idxExpr valExpr -> do
     vArr <- evalExpr fenv env (Var arrName)
@@ -572,6 +591,26 @@ testAcessoVariavelGlobal = TestCase $ do
   v <- evalExpr fenv envGlobal (Call "leGlobal" [])
   assertEqual "funcao deve conseguir ler a variavel global g" (VInt 42) v
 
+testAtribuicaoConversaoTipos :: Test
+testAtribuicaoConversaoTipos = TestCase $ do
+  let prog = Block
+        [ Decl TFloat "x" (Lit 10)             -- 10 (Int) -> vira 10.0 (Float)
+        , Decl TInt   "y" (FLit 5.8)           -- 5.8 (Float) -> trunca para 5 (Int)
+        , Assign "x" (BinE Add (Var "x") (Var "y")) -- 10.0 + 5.0 = 15.0
+        , Return (Var "x")
+        ]
+  v <- runProg Map.empty prog
+  assertEqual "conversao implicita int->float e float->int em declaracao e atribuicao" (VFloat 15.0) v
+
+testAtribuicaoIncompativelBoolParaInt :: Test
+testAtribuicaoIncompativelBoolParaInt = TestCase $ do
+  -- Tentar declarar: int x = verdadeiro;
+  let prog = Decl TInt "x" (BLit True)
+  -- E.catch captura o erro de runtime disparado por coerceValue
+  result <- E.catch (runProg Map.empty prog >> return "OK")
+                    (\(E.SomeException _) -> return "ERRO")
+  assertEqual "atribuir Bool para TInt deve ser rejeitado" "ERRO" result
+
 -- suite completa
 
 suite :: Test
@@ -587,6 +626,8 @@ suite = TestList
   , TestLabel "declaracao array"     testDeclEAccArray
   , TestLabel "ordem avaliacao args"  testOrdemAvaliacaoArgs
   , TestLabel "acesso variavel global" testAcessoVariavelGlobal
+  , TestLabel "conversao tipos C"    testAtribuicaoConversaoTipos
+  , TestLabel "rejeita bool em int" testAtribuicaoIncompativelBoolParaInt
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
