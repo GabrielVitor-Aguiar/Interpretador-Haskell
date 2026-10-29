@@ -234,7 +234,7 @@ coerceValue TFloat (VFloat f)          = VFloat f
 coerceValue TFloat (VInt n)            = VFloat (fromIntegral n)
 coerceValue TBool  (VBool b)           = VBool b
 coerceValue (TArray _) (VArray vals)   = VArray vals
-coerceValue targetType val             = error ("Tipos incompativeis: nao eh possivel atribuir " ++ show val ++ " para o tipo " ++ show targetType)
+coerceValue targetType val             = error ("Tipos incompativeis: não é possivel atribuir " ++ show val ++ " para o tipo " ++ show targetType)
 
 execStmt :: FunEnv -> Env -> Stmt -> IO StmtResult
 execStmt fenv env stmt = case stmt of
@@ -253,7 +253,7 @@ execStmt fenv env stmt = case stmt of
     vCoerced `seq` return (Next (Map.insert x vCoerced env))
 
   Assign x e -> case Map.lookup x env of
-    Nothing -> error ("Variavel nao declarada: " ++ x)
+    Nothing -> error ("Variavel não declarada: " ++ x)
     Just currentVal -> do
       v <- evalExpr fenv env e
       let targetType = valueType currentVal
@@ -268,20 +268,22 @@ execStmt fenv env stmt = case stmt of
       (VArray vals, VInt idx) ->
         if idx >= 0 && idx < length vals
           then do
-            let (before, _:after) = splitAt idx vals
-                newVals = before ++ [vVal] ++ after
-                env' = Map.insert arrName (VArray newVals) env
-            return (Next env')
+            let currentElem = vals !! idx
+                elemType    = valueType currentElem
+                vCoerced    = coerceValue elemType vVal
+                (before, _:after) = splitAt idx vals
+                newVals     = before ++ [vCoerced] ++ after
+            vCoerced `seq` return (Next (Map.insert arrName (VArray newVals) env))
           else error ("Indice fora dos limites do array: " ++ show idx)
       (VArray _, _) -> error "Indice de array deve ser do tipo Int"
-      _             -> error ("A variavel " ++ arrName ++ " nao eh um array")
+      _             -> error ("A variavel " ++ arrName ++ " não é um array")
 
   If cond t f -> do
     v <- evalExpr fenv env cond
     case v of
       VBool True  -> execStmt fenv env t
       VBool False -> execStmt fenv env f
-      _           -> error "Condicao do If nao eh booleana"
+      _           -> error "Condição do If não é booleana"
 
   Return e -> do
     v <- evalExpr fenv env e
@@ -299,7 +301,7 @@ execStmt fenv env stmt = case stmt of
         case r of
           Returned v' env' -> return (Returned v' env')
           Next        env' -> execStmt fenv env' (While cond body)
-      _ -> error "Condicao do While nao eh booleana"
+      _ -> error "Condiçãoo do While não é booleana"
 
 -- ============================================================
 -- Execução de um bloco
@@ -623,6 +625,16 @@ testReatribuicaoCoercaoAssign = TestCase $ do
   v <- runProg Map.empty prog
   assertEqual "reatribuicao via Assign deve aplicar coercao ao tipo da variavel" (VFloat 17.0) v
 
+testArrAssignCoercao :: Test
+testArrAssignCoercao = TestCase $ do
+  let prog = Block
+        [ Decl (TArray TInt) "arr" (ArrayLit [Lit 10, Lit 20])
+        , ArrAssign "arr" (Lit 0) (FLit 5.9)
+        , Return (ArrAcc "arr" (Lit 0))
+        ]
+  v <- runProg Map.empty prog
+  assertEqual "ArrAssign deve aplicar coercao ao tipo dos elementos do array" (VInt 5) v
+
 -- suite completa
 
 suite :: Test
@@ -641,6 +653,7 @@ suite = TestList
   , TestLabel "conversao tipos C"    testAtribuicaoConversaoTipos
   , TestLabel "rejeita bool em int" testAtribuicaoIncompativelBoolParaInt
   , TestLabel "reatribuicao coercao assign" testReatribuicaoCoercaoAssign
+  , TestLabel "coercao em arr assign" testArrAssignCoercao
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
