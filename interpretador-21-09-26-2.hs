@@ -611,6 +611,18 @@ testAtribuicaoIncompativelBoolParaInt = TestCase $ do
                     (\(E.SomeException _) -> return "ERRO")
   assertEqual "atribuir Bool para TInt deve ser rejeitado" "ERRO" result
 
+testReatribuicaoCoercaoAssign :: Test
+testReatribuicaoCoercaoAssign = TestCase $ do
+  let prog = Block
+        [ Decl TFloat "a" (FLit 1.0)
+        , Assign "a" (Lit 10)
+        , Decl TInt   "b" (Lit 0)
+        , Assign "b" (FLit 7.9)
+        , Return (BinE Add (Var "a") (Var "b"))
+        ]
+  v <- runProg Map.empty prog
+  assertEqual "reatribuicao via Assign deve aplicar coercao ao tipo da variavel" (VFloat 17.0) v
+
 -- suite completa
 
 suite :: Test
@@ -628,6 +640,7 @@ suite = TestList
   , TestLabel "acesso variavel global" testAcessoVariavelGlobal
   , TestLabel "conversao tipos C"    testAtribuicaoConversaoTipos
   , TestLabel "rejeita bool em int" testAtribuicaoIncompativelBoolParaInt
+  , TestLabel "reatribuicao coercao assign" testReatribuicaoCoercaoAssign
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
