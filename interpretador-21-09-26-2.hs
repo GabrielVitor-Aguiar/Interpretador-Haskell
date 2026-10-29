@@ -665,3 +665,70 @@ suite = TestList
 
 main :: IO ()
 main = runTestTTAndExit suite
+
+-- Executa e imprime no terminal a verificacao de cada funcionalidade
+-- Para executar os testes, basta escrever no terminal do ghci:
+  -- :r
+  --  rodarDemonstracao
+rodarDemonstracao :: IO ()
+rodarDemonstracao = do
+  putStrLn "========================================================="
+  putStrLn "      VERIFICACAO DE FUNCIONALIDADES DO INTERPRETADOR    "
+  putStrLn "========================================================="
+  
+  putStrLn "\n[1] Soma Float Simples (2.5 + 1.5):"
+  print $ evalBinOp Add (VFloat 2.5) (VFloat 1.5)
+
+  putStrLn "\n[2] Operacao Mista Int/Float (5.5 - 2):"
+  print $ evalBinOp Sub (VFloat 5.5) (VInt 2)
+
+  putStrLn "\n[3] Divisao Inteira (7 / 2):"
+  print $ evalBinOp Div (VInt 7) (VInt 2)
+
+  putStrLn "\n[4] Divisao Float (7 / 2.0):"
+  print $ evalBinOp Div (VInt 7) (VFloat 2.0)
+
+  putStrLn "\n[5] Comparacao Relacional Float (2.5 < 3.0 e 5.5 > 2):"
+  print (evalBinOp Lt (VFloat 2.5) (VFloat 3.0), evalBinOp Gt (VFloat 5.5) (VInt 2))
+
+  putStrLn "\n[6] Acesso a Array por Indice (vetor[1] em [10, 20, 30]):"
+  let envArr = Map.singleton "vetor" (VArray [VInt 10, VInt 20, VInt 30])
+  v1 <- evalExpr Map.empty envArr (ArrAcc "vetor" (Lit 1))
+  print v1
+
+  putStrLn "\n[7] Alteracao de Array por Indice (vetor[1] = 99 em [10, 20, 30]):"
+  -- Retorna a variavel "vetor" inteira para exibir o array completo modificado
+  let progArr = Block [Decl (TArray TInt) "vetor" (ArrayLit [Lit 10, Lit 20, Lit 30]), ArrAssign "vetor" (Lit 1) (Lit 99), Return (Var "vetor")]
+  v2 <- runProg Map.empty progArr
+  print v2
+
+  putStrLn "\n[8] Ordem de Avaliacao de Argumentos (Imprime p1, depois p2, depois retorna a soma):"
+  let fenvArgs = Map.fromList 
+        [ ("p1", FunDecl "p1" [] (Block [Print (Lit 1), Return (Lit 10)]))
+        , ("p2", FunDecl "p2" [] (Block [Print (Lit 2), Return (Lit 20)]))
+        , ("soma", FunDecl "soma" [(TInt, "a"), (TInt, "b")] (Return (BinE Add (Var "a") (Var "b"))))
+        ]
+  v3 <- evalExpr fenvArgs Map.empty (Call "soma" [Call "p1" [], Call "p2" []])
+  putStrLn $ "Resultado retornado pela soma: " ++ show v3
+
+  putStrLn "\n[9] Conversao Implicita estilo C (float x = 10; int y = 5.8; return x + y):"
+  let progC = Block [Decl TFloat "x" (Lit 10), Decl TInt "y" (FLit 5.8), Return (BinE Add (Var "x") (Var "y"))]
+  v4 <- runProg Map.empty progC
+  print v4
+
+  putStrLn "\n[10] Rejeicao de Tipo Incompativel (int x = verdadeiro):"
+  resErr <- E.catch (runProg Map.empty (Decl TInt "x" (BLit True)) >> return "SUCESSO (Incorreto)")
+                    (\(E.SomeException _) -> return "REJEITADO COM ERRO (Correto)")
+  putStrLn resErr
+
+  putStrLn "\n[11] Reatribuicao com Coercao via Assign (float a = 1.0; a = 10; int b = 0; b = 7.9; return a + b):"
+  let progAssign = Block [Decl TFloat "a" (FLit 1.0), Assign "a" (Lit 10), Decl TInt "b" (Lit 0), Assign "b" (FLit 7.9), Return (BinE Add (Var "a") (Var "b"))]
+  v5 <- runProg Map.empty progAssign
+  print v5
+
+  putStrLn "\n[12] Coercao em Elemento de Array via ArrAssign (int arr[2] = [10, 20]; arr[0] = 5.9; return arr[0]):"
+  let progArrCoerce = Block [Decl (TArray TInt) "arr" (ArrayLit [Lit 10, Lit 20]), ArrAssign "arr" (Lit 0) (FLit 5.9), Return (ArrAcc "arr" (Lit 0))]
+  v6 <- runProg Map.empty progArrCoerce
+  print v6
+
+  putStrLn "\n========================================================="
