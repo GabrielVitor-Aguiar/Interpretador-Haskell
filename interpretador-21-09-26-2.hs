@@ -44,6 +44,7 @@ data Expr
 data Stmt
   = Decl   Type String Expr    -- int x = 10; 
   | Assign String Expr         -- x = 20 + 10
+  | ArrAssign String Expr Expr -- vetor[1] = 99
   | If     Expr Stmt Stmt
   | While  Expr Stmt
   | Block  [Stmt]
@@ -232,6 +233,22 @@ execStmt fenv env stmt = case stmt of
         v <- evalExpr fenv env e
         let env' = Map.insert x v env
         return (Next env')
+
+  ArrAssign arrName idxExpr valExpr -> do
+    vArr <- evalExpr fenv env (Var arrName)
+    vIdx <- evalExpr fenv env idxExpr
+    vVal <- evalExpr fenv env valExpr
+    case (vArr, vIdx) of
+      (VArray vals, VInt idx) ->
+        if idx >= 0 && idx < length vals
+          then do
+            let (before, _:after) = splitAt idx vals
+                newVals = before ++ [vVal] ++ after
+                env' = Map.insert arrName (VArray newVals) env
+            return (Next env')
+          else error ("Indice fora dos limites do array: " ++ show idx)
+      (VArray _, _) -> error "Indice de array deve ser do tipo Int"
+      _             -> error ("A variavel " ++ arrName ++ " nao eh um array")
 
   If cond t f -> do
     v <- evalExpr fenv env cond
@@ -489,6 +506,16 @@ testAcessoArray = TestCase $ do
   val <- evalExpr Map.empty env (ArrAcc "vetor" (Lit 1))
   assertEqual "acesso ao indice 1 do vetor deve retornar 20" (VInt 20) val
 
+testAtribuicaoArray :: Test
+testAtribuicaoArray = TestCase $ do
+  let env = Map.singleton "vetor" (VArray [VInt 10, VInt 20, VInt 30])
+  res <- execStmt Map.empty env (ArrAssign "vetor" (Lit 1) (Lit 99))
+  case res of
+    Next env' -> case Map.lookup "vetor" env' of
+      Just (VArray vals) -> assertEqual "indice 1 alterado para 99" [VInt 10, VInt 99, VInt 30] vals
+      _ -> assertFailure "vetor nao encontrado no ambiente"
+    _ -> assertFailure "execucao de ArrAssign retornou Returned em vez de Next"
+
 -- suite completa
 
 suite :: Test
@@ -500,6 +527,7 @@ suite = TestList
   , TestLabel "divisao float"        testDivisaoFloat
   , TestLabel "comparacao float"     testComparacaoFloat
   , TestLabel "acesso array"         testAcessoArray
+  , TestLabel "atribuicao array"     testAtribuicaoArray
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
