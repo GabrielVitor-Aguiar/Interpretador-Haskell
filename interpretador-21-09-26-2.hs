@@ -21,6 +21,7 @@ data Type
   | TBool
   | TVoid
   | TFloat
+  | TArray Type
   deriving (Show, Eq)
 
 data BinOp
@@ -37,6 +38,7 @@ data Expr
   | BinE  BinOp Expr Expr
   | Not   Expr
   | Call  String [Expr]
+  | ArrAcc String Expr
   deriving (Show, Eq)
 
 data Stmt
@@ -65,6 +67,7 @@ data Value
   = VInt  Int
   | VBool Bool
   | VFloat Double
+  | VArray [Value]
   | VVoid
   deriving (Show, Eq)
 
@@ -93,6 +96,16 @@ evalExpr fenv env expr = case expr of
   Lit  n -> return (VInt n)
   BLit b -> return (VBool b)
   FLit f -> return (VFloat f)
+  ArrAcc arrName idxExpr -> do
+    vArr <- evalExpr fenv env (Var arrName)
+    vIdx <- evalExpr fenv env idxExpr
+    case (vArr, vIdx) of
+      (VArray vals, VInt idx) ->
+        if idx >= 0 && idx < length vals
+          then return (vals !! idx)
+          else error ("Indice fora dos limites do array: " ++ show idx)
+      (VArray _, _) -> error "Indice de array deve ser do tipo Int"
+      _             -> error ("A variavel " ++ arrName ++ " nao eh um array")
 
   Var x  -> case Map.lookup x env of
                Nothing -> error ("Variavel nao declarada: " ++ x)
@@ -262,9 +275,17 @@ execBlock fenv env (s:ss) = do
 -- ============================================================
 
 showValue :: Value -> String
-showValue (VInt  n) = show n
+showValue (VInt   n) = show n
+showValue (VBool  b) = if b then "verdadeiro" else "falso"
 showValue (VFloat f) = show f
-showValue (VBool b) = if b then "verdadeiro" else "falso"
+
+showValue (VArray xs) = "[" ++ showListValues xs ++ "]"
+  where
+    showListValues []     = ""
+    showListValues [v]    = showValue v
+    showListValues (v:vs) = showValue v ++ ", " ++ showListValues vs
+
+showValue VVoid      = "()"
 showValue VVoid     = "()"
 
 -- ============================================================
@@ -462,6 +483,12 @@ testComparacaoFloat = TestCase $ do
   assertEqual "2.5 < 3.0 deve ser verdadeiro" (VBool True) resLt
   assertEqual "5.5 > 2 deve ser verdadeiro" (VBool True) resGt
 
+testAcessoArray :: Test
+testAcessoArray = TestCase $ do
+  let env = Map.singleton "vetor" (VArray [VInt 10, VInt 20, VInt 30])
+  val <- evalExpr Map.empty env (ArrAcc "vetor" (Lit 1))
+  assertEqual "acesso ao indice 1 do vetor deve retornar 20" (VInt 20) val
+
 -- suite completa
 
 suite :: Test
@@ -472,6 +499,7 @@ suite = TestList
   , TestLabel "divisao inteira"      testDivisaoInteira
   , TestLabel "divisao float"        testDivisaoFloat
   , TestLabel "comparacao float"     testComparacaoFloat
+  , TestLabel "acesso array"         testAcessoArray
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
