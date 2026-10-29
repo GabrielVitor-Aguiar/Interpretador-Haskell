@@ -133,20 +133,47 @@ evalExpr fenv env expr = case expr of
 -- ============================================================
 
 evalBinOp :: BinOp -> Value -> Value -> Value
+-- Adição
 evalBinOp Add (VInt   a) (VInt   b) = VInt   (a + b)
 evalBinOp Add (VFloat a) (VFloat b) = VFloat (a + b)
-evalBinOp Sub (VInt  a) (VInt  b) = VInt  (a - b)
-evalBinOp Mul (VInt  a) (VInt  b) = VInt  (a * b)
-evalBinOp Div (VInt  a) (VInt  b) = VInt  (a `div` b)
-evalBinOp Mod (VInt  a) (VInt  b) = VInt  (a `mod` b)
+evalBinOp Add (VInt   a) (VFloat b) = VFloat (fromIntegral a + b)
+evalBinOp Add (VFloat a) (VInt   b) = VFloat (a + fromIntegral b)
+
+-- Subtração
+evalBinOp Sub (VInt   a) (VInt   b) = VInt   (a - b)
+evalBinOp Sub (VFloat a) (VFloat b) = VFloat (a - b)
+evalBinOp Sub (VInt   a) (VFloat b) = VFloat (fromIntegral a - b)
+evalBinOp Sub (VFloat a) (VInt   b) = VFloat (a - fromIntegral b)
+
+-- Multiplicação
+evalBinOp Mul (VInt   a) (VInt   b) = VInt   (a * b)
+evalBinOp Mul (VFloat a) (VFloat b) = VFloat (a * b)
+evalBinOp Mul (VInt   a) (VFloat b) = VFloat (fromIntegral a * b)
+evalBinOp Mul (VFloat a) (VInt   b) = VFloat (a * fromIntegral b)
+
+-- Divisão
+evalBinOp Div (VInt   a) (VInt   b) = VInt   (a `div` b)
+evalBinOp Div (VFloat a) (VFloat b) = VFloat (a / b)
+evalBinOp Div (VInt   a) (VFloat b) = VFloat (fromIntegral a / b)
+evalBinOp Div (VFloat a) (VInt   b) = VFloat (a / fromIntegral b)
+
+-- Resto da divisão
+evalBinOp Mod (VInt   a) (VInt   b) = VInt   (a `mod` b)
+
+-- Operadores de Igualdade
 evalBinOp Eq  va        vb        = VBool (va == vb)
 evalBinOp Neq va        vb        = VBool (va /= vb)
-evalBinOp Lt  (VInt  a) (VInt  b) = VBool (a <  b)
-evalBinOp Gt  (VInt  a) (VInt  b) = VBool (a >  b)
-evalBinOp Le  (VInt  a) (VInt  b) = VBool (a <= b)
-evalBinOp Ge  (VInt  a) (VInt  b) = VBool (a >= b)
-evalBinOp And (VBool a) (VBool b) = VBool (a && b)
-evalBinOp Or  (VBool a) (VBool b) = VBool (a || b)
+
+-- Operadores Relacionais
+evalBinOp Lt  (VInt   a) (VInt   b) = VBool (a <  b)
+evalBinOp Gt  (VInt   a) (VInt   b) = VBool (a >  b)
+evalBinOp Le  (VInt   a) (VInt   b) = VBool (a <= b)
+evalBinOp Ge  (VInt   a) (VInt   b) = VBool (a >= b)
+
+-- Operadores Lógicos
+evalBinOp And (VBool  a) (VBool  b) = VBool (a && b)
+evalBinOp Or  (VBool  a) (VBool  b) = VBool (a || b)
+
 evalBinOp op  _         _         =
   error ("Operacao invalida ou tipos incompativeis: " ++ show op)
 
@@ -398,12 +425,30 @@ testSomaFloatSimples = TestCase $ do
   let resultado = evalBinOp Add (VFloat 2.5) (VFloat 1.5)
   assertEqual "soma de 2.5 + 1.5 deve ser 4.0" (VFloat 4.0) resultado
 
+testOperacaoMista :: Test
+testOperacaoMista = TestCase $ do
+  let resSub = evalBinOp Sub (VFloat 5.5) (VInt 2)
+  assertEqual "5.5 - 2 deve ser 3.5" (VFloat 3.5) resSub
+
+testDivisaoInteira :: Test
+testDivisaoInteira = TestCase $ do
+  let resDiv = evalBinOp Div (VInt 7) (VInt 2)
+  assertEqual "7 / 2 (inteiro) deve ser 3" (VInt 3) resDiv
+
+testDivisaoFloat :: Test
+testDivisaoFloat = TestCase $ do
+  let resDiv = evalBinOp Div (VInt 7) (VFloat 2.0)
+  assertEqual "7 / 2.0 (float) deve ser 3.5" (VFloat 3.5) resDiv
+
 -- suite completa
 
 suite :: Test
 suite = TestList
   [ TestLabel "soma simples"         testSomaSimples
   , TestLabel "Soma Float Simples"   testSomaFloatSimples
+  , TestLabel "operacao mista"       testOperacaoMista
+  , TestLabel "divisao inteira"      testDivisaoInteira
+  , TestLabel "divisao float"        testDivisaoFloat
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
