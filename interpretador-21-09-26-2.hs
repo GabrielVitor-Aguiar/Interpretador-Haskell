@@ -194,11 +194,14 @@ evalBinOp Mod (VInt   a) (VInt   b) = VInt   (a `mod` b)
 -- Exponencial
 evalBinOp Exp (VInt a) (VInt b) = VInt (a ^ b)
 evalBinOp Exp (VFloat a) (VInt b) = VFloat (a ^^ b)
+evalBinOp Exp (VInt a) (VFloat b) = VFloat (fromIntegral a ** b)
 evalBinOp Exp (VFloat a) (VFloat b) = VFloat (a ** b)
 
 -- Raiz
-evalBinOp Sqrt (VInt a) (VInt b) = VFloat (fromIntegral a ** (1/fromIntegral b))
+evalBinOp Sqrt (VInt a) (VInt b) = VFloat (fromIntegral a ** (1 / fromIntegral b))
 evalBinOp Sqrt (VFloat a) (VFloat b) = VFloat (a ** (1/b))
+evalBinOp Sqrt (VInt a) (VFloat b) = VFloat (fromIntegral a ** (1/b))
+evalBinOp Sqrt (VFloat a) (VInt b) = VFloat (a ** (1/ fromIntegral b))
 
 -- Operadores de Igualdade
 evalBinOp Eq  va        vb        = VBool (va == vb)
@@ -578,7 +581,32 @@ testDivisaoFloat = TestCase $ do
 testExpInteira :: Test
 testExpInteira = TestCase $ do
   let resExp = evalBinOp Exp (VInt 4) (VInt 3)
-  assertEqual "4^3 (inteiro) deve ser 64" (VInt 64) resExp
+  assertEqual "4^3 deve ser 64" (VInt 64) resExp
+
+testExpFloat :: Test
+testExpFloat = TestCase $ do
+  let resExp = evalBinOp Exp (VFloat 3.25) (VFloat 1.5)
+  assertEqual "3.25^1.5 deve ser 5.859020822628982601" (VFloat 5.859020822628982601) resExp
+
+testExpMista :: Test
+testExpMista = TestCase $ do
+  let resExp = evalBinOp Exp (VFloat 5.3) (VFloat 2)
+  assertEqual "5.3^2 deve ser 28.09" (VFloat 28.09) resExp
+
+testSqrtInteira :: Test
+testSqrtInteira = TestCase $ do
+  let resSqrt = evalBinOp Sqrt (VInt 9) (VFloat 2)
+  assertEqual "Raiz quadrada de 9 deve ser 3" (VFloat 3) resSqrt
+
+testSqrtFloat :: Test
+testSqrtFloat = TestCase $ do
+  let resSqrt = evalBinOp Sqrt (VFloat 3.3) (VFloat 2.5)
+  assertEqual "3.3 pela raíz 2.5 deve ser 1.612150476429788429" (VFloat 1.612150476429788429) resSqrt
+
+testSqrtMista :: Test
+testSqrtMista = TestCase $ do
+  let resSqrt = evalBinOp Sqrt (VFloat 2.5) (VFloat 3)
+  assertEqual "A raíz cúbica 2.5 deve ser 1.357208808297453285" (VFloat 1.357208808297453285) resSqrt
 
 testComparacaoFloat :: Test
 testComparacaoFloat = TestCase $ do
@@ -709,6 +737,10 @@ suite = TestList
   , TestLabel "operacao mista"       testOperacaoMista
   , TestLabel "divisao inteira"      testDivisaoInteira
   , TestLabel "divisao float"        testDivisaoFloat
+  , TestLabel "exponencial inteira"  testExpInteira
+  , TestLabel "exponencial float"    testExpFloat
+  , TestLabel "raíz inteira"         testSqrtInteira
+  , TestLabel "raíz float"           testSqrtFloat
   , TestLabel "comparacao float"     testComparacaoFloat
   , TestLabel "acesso array"         testAcessoArray
   , TestLabel "atribuicao array"     testAtribuicaoArray
