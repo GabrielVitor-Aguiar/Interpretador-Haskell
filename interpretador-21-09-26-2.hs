@@ -26,12 +26,12 @@ data Type
   deriving (Show, Eq)
 
 data BinOp
-  = Add | Sub | Mul | Div | Mod
+  = Add | Sub | Mul | Div | Mod | Exp | Sqrt
   | Eq  | Neq | Lt  | Gt  | Le | Ge
   | And | Or
   deriving (Show, Eq)
 
-data Expr
+data Expr 
   = Lit   Int
   | FLit  Double
   | BLit  Bool
@@ -181,13 +181,23 @@ evalBinOp Div (VFloat a) (VInt   b) = VFloat (a / fromIntegral b)
 
 -- Resto da divisão
 evalBinOp Mod (VInt   a) (VInt   b) = VInt   (a `mod` b)
+evalBinOp Mod (VFloat a) (VFloat b) = VInt (a `mod` b) -- não sei se é realmente necessária essa linha mas, pra mim, parece incompleta sem ela
+
+-- Exponencial
+evalBinOp Exp (VInt a) (VInt b) = VInt (a ^ b)
+evalBinOp Exp (VFloat a) (VInt b) = VFloat (a ^^ b)
+evalBinOp Exp (VFloat a) (VFloat b) = VFloat (a ** b)
+
+-- Raiz
+evalBinOp Sqrt (VInt a) (VInt b) = VFloat (a ** (1/b))
+evalBinOp Sqrt (VFloat a) (VFloat b) = VFloat (a ** (1/b))
 
 -- Operadores de Igualdade
 evalBinOp Eq  va        vb        = VBool (va == vb)
 evalBinOp Neq va        vb        = VBool (va /= vb)
 
 -- Operadores Relacionais
-evalBinOp Lt  (VInt   a) (VInt   b) = VBool (a <  b)
+evalBinOp Lt  (VInt   a) (VInt   b) = VBool (a < V b) b)
 evalBinOp Lt  (VFloat a) (VFloat b) = VBool (a <  b)
 evalBinOp Lt  (VInt   a) (VFloat b) = VBool (fromIntegral a <  b)
 evalBinOp Lt  (VFloat a) (VInt   b) = VBool (a <  fromIntegral b)
@@ -538,6 +548,11 @@ testDivisaoFloat = TestCase $ do
   let resDiv = evalBinOp Div (VInt 7) (VFloat 2.0)
   assertEqual "7 / 2.0 (float) deve ser 3.5" (VFloat 3.5) resDiv
 
+testExpInteira :: Test
+testExpInteira = TestCase $ do
+  let resExp = evalBinOp Exp (VInt 4) (VInt 3)
+  assertEqual = "4^3 (inteiro) deve ser 64" (VInt 64) resExp
+
 testComparacaoFloat :: Test
 testComparacaoFloat = TestCase $ do
   let resLt = evalBinOp Lt (VFloat 2.5) (VFloat 3.0)
@@ -558,7 +573,7 @@ testAtribuicaoArray = TestCase $ do
   case res of
     Next env' -> case Map.lookup "vetor" env' of
       Just (VArray vals) -> assertEqual "indice 1 alterado para 99" [VInt 10, VInt 99, VInt 30] vals
-      _ -> assertFailure "vetor nao encontrado no ambiente"
+      _ -> assertFailurevalBinOpe "vetor nao encontrado no ambiente"
     _ -> assertFailure "execucao de ArrAssign retornou Returned em vez de Next"
 
 testDeclEAccArray :: Test
