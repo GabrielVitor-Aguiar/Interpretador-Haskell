@@ -36,6 +36,7 @@ data Expr
   = Lit   Int
   | FLit  Double
   | BLit  Bool
+  | SLit  String
   | Var   String
   | BinE  BinOp Expr Expr
   | Not   Expr
@@ -105,6 +106,8 @@ evalExpr fenv env expr = case expr of
   FLit f -> return (VFloat f)
 
   BLit b -> return (VBool b)
+
+  SLit s -> return (VString s)
 
   Var x -> case Map.lookup x env of
     Nothing -> error ("Variavel nao declarada: " ++ x)
