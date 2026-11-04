@@ -23,6 +23,7 @@ data Type
   | TVoid
   | TFloat
   | TArray Type
+  | TString
   deriving (Show, Eq)
 
 data BinOp
@@ -52,6 +53,8 @@ data Stmt
   | Block  [Stmt]
   | Return Expr                -- return x + y
   | Print  Expr                -- printf (10)
+  | Throw Expr                 -- throw error
+  | TryCatch Stmt String Stmt    -- try { ... } catch (e) { ... }
   | Skip
   deriving (Show, Eq)
 
@@ -71,6 +74,7 @@ data Value
   | VBool Bool
   | VFloat Double
   | VArray [Value]
+  | VString String -- Nico: Implementando Unicamente para o caso de erro, para que seja possivel imprimir o valor do erro.
   | VVoid
   deriving (Show, Eq)
 
@@ -87,6 +91,7 @@ type FunEnv = Map String FunDecl
 data StmtResult
   = Next     Env
   | Returned Value Env
+  | Thrown  Value Env
   deriving (Show)
 
 -- ============================================================
@@ -149,6 +154,7 @@ evalExpr fenv env expr = case expr of
           case result of
             Returned v _ -> return v
             Next _       -> return VVoid
+            Thrown errVal _ -> error ("Erro na funcao " ++ fname ++ ": " ++ show errVal)
 
 -- ============================================================
 -- evalBinOp — permanece pura
@@ -181,7 +187,6 @@ evalBinOp Div (VFloat a) (VInt   b) = VFloat (a / fromIntegral b)
 
 -- Resto da divisão
 evalBinOp Mod (VInt   a) (VInt   b) = VInt   (a `mod` b)
-evalBinOp Mod (VFloat a) (VFloat b) = VInt (a `mod` b) -- não sei se é realmente necessária essa linha mas, pra mim, parece incompleta sem ela
 
 -- Exponencial
 evalBinOp Exp (VInt a) (VInt b) = VInt (a ^ b)
@@ -189,7 +194,7 @@ evalBinOp Exp (VFloat a) (VInt b) = VFloat (a ^^ b)
 evalBinOp Exp (VFloat a) (VFloat b) = VFloat (a ** b)
 
 -- Raiz
-evalBinOp Sqrt (VInt a) (VInt b) = VFloat (a ** (1/b))
+evalBinOp Sqrt (VInt a) (VInt b) = VFloat (fromIntegral a ** (1/fromIntegral b))
 evalBinOp Sqrt (VFloat a) (VFloat b) = VFloat (a ** (1/b))
 
 -- Operadores de Igualdade
@@ -197,7 +202,7 @@ evalBinOp Eq  va        vb        = VBool (va == vb)
 evalBinOp Neq va        vb        = VBool (va /= vb)
 
 -- Operadores Relacionais
-evalBinOp Lt  (VInt   a) (VInt   b) = VBool (a < V b) b)
+evalBinOp Lt  (VInt   a) (VInt   b) = VBool (a <  b)
 evalBinOp Lt  (VFloat a) (VFloat b) = VBool (a <  b)
 evalBinOp Lt  (VInt   a) (VFloat b) = VBool (fromIntegral a <  b)
 evalBinOp Lt  (VFloat a) (VInt   b) = VBool (a <  fromIntegral b)
@@ -234,6 +239,7 @@ valueType (VInt _)    = TInt
 valueType (VFloat _)  = TFloat
 valueType (VBool _)   = TBool
 valueType (VArray _)  = TArray TVoid
+valueType (VString _) = TString -- Nico: Implementando Unicamente para o caso de erro, para que seja possivel imprimir o valor do erro.
 valueType VVoid       = TVoid
 
 -- Converte um valor para o tipo esperado
@@ -244,6 +250,7 @@ coerceValue TFloat (VFloat f)          = VFloat f
 coerceValue TFloat (VInt n)            = VFloat (fromIntegral n)
 coerceValue TBool  (VBool b)           = VBool b
 coerceValue (TArray _) (VArray vals)   = VArray vals
+coerceValue TString (VString s)         = VString s
 coerceValue targetType val             = error ("Tipos incompativeis: não é possivel atribuir " ++ show val ++ " para o tipo " ++ show targetType)
 
 execStmt :: FunEnv -> Env -> Stmt -> IO StmtResult
@@ -311,7 +318,22 @@ execStmt fenv env stmt = case stmt of
         case r of
           Returned v' env' -> return (Returned v' env')
           Next        env' -> execStmt fenv env' (While cond body)
+          Thrown errVal env' -> return (Thrown errVal env')
       _ -> error "Condiçãoo do While não é booleana"
+  Throw e -> do
+    v <- evalExpr fenv env e
+    return (Thrown v env) -- Retorna um valor de erro
+  
+  TryCatch tryBlock errVar catchBlock -> do
+    r <- E.catch (execStmt fenv env tryBlock)
+                 (\(E.SomeException ex) -> return (Thrown (VString (show ex)) env))
+    case r of
+      -- Se um erro foi lançado, insere o valor do erro no ambiente e executa o bloco de captura
+      Thrown errVal env' -> do
+        let envWithErr = Map.insert errVar errVal env'
+        execStmt fenv envWithErr catchBlock
+      -- Se não houve erro, apenas retorna o resultado do bloco try
+      _ -> return r
 
 -- ============================================================
 -- Execução de um bloco
@@ -324,6 +346,7 @@ execBlock fenv env (s:ss) = do
   case r of
     Returned v env' -> return (Returned v env')
     Next       env' -> execBlock fenv env' ss
+    Thrown errVal env' -> return (Thrown errVal env')
 
 -- ============================================================
 -- Utilitários
@@ -339,7 +362,8 @@ showValue (VArray xs) = "[" ++ showListValues xs ++ "]"
     showListValues []     = ""
     showListValues [v]    = showValue v
     showListValues (v:vs) = showValue v ++ ", " ++ showListValues vs
-
+    
+showValue (VString s) = "\"" ++ s ++ "\""
 showValue VVoid     = "()"
 
 -- ============================================================
@@ -551,7 +575,7 @@ testDivisaoFloat = TestCase $ do
 testExpInteira :: Test
 testExpInteira = TestCase $ do
   let resExp = evalBinOp Exp (VInt 4) (VInt 3)
-  assertEqual = "4^3 (inteiro) deve ser 64" (VInt 64) resExp
+  assertEqual "4^3 (inteiro) deve ser 64" (VInt 64) resExp
 
 testComparacaoFloat :: Test
 testComparacaoFloat = TestCase $ do
@@ -573,7 +597,7 @@ testAtribuicaoArray = TestCase $ do
   case res of
     Next env' -> case Map.lookup "vetor" env' of
       Just (VArray vals) -> assertEqual "indice 1 alterado para 99" [VInt 10, VInt 99, VInt 30] vals
-      _ -> assertFailurevalBinOpe "vetor nao encontrado no ambiente"
+      _ -> assertFailure "vetor nao encontrado no ambiente"
     _ -> assertFailure "execucao de ArrAssign retornou Returned em vez de Next"
 
 testDeclEAccArray :: Test
@@ -650,6 +674,29 @@ testArrAssignCoercao = TestCase $ do
   v <- runProg Map.empty prog
   assertEqual "ArrAssign deve aplicar coercao ao tipo dos elementos do array" (VInt 5) v
 
+testTryCatch :: Test
+testTryCatch = TestCase $ do
+  let prog = Block
+        [ TryCatch
+            (Block [Throw (Lit 42)])
+            "err"
+            (Return (Var "err"))
+        ]
+  v <- runProg Map.empty prog
+  assertEqual "TryCatch deve capturar o valor lançado" (VInt 42) v
+
+testTryCatchDivZero :: Test
+testTryCatchDivZero = TestCase $ do
+  let prog = Block
+        [ TryCatch
+            (Block [Print (BinE Div (Lit 10) (Lit 0))])
+            "err"
+            (Block [Return (Var "err")])
+        ]
+  v <- runProg Map.empty prog
+  assertEqual "TryCatch deve capturar erro de divisao por zero" (VString "divide by zero") v
+  
+
 -- suite completa
 
 suite :: Test
@@ -669,6 +716,8 @@ suite = TestList
   , TestLabel "rejeita bool em int" testAtribuicaoIncompativelBoolParaInt
   , TestLabel "reatribuicao coercao assign" testReatribuicaoCoercaoAssign
   , TestLabel "coercao em arr assign" testArrAssignCoercao
+  , TestLabel "try catch"            testTryCatch
+  , TestLabel "try catch div zero"   testTryCatchDivZero
   , TestLabel "condicional"          testCondicionalVerdade
   , TestLabel "while retorna"        testWhileContaAte3
   , TestLabel "chamada dobro"        testDobro
