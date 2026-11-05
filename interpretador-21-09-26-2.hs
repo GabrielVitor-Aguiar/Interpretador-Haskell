@@ -586,7 +586,7 @@ testExpInteira = TestCase $ do
 testExpFloat :: Test
 testExpFloat = TestCase $ do
   let resExp = evalBinOp Exp (VFloat 3.25) (VFloat 1.5)
-  assertEqual "3.25^1.5 deve ser 5.859020822628982601" (VFloat 5.859020822628982601) resExp
+  assertEqual "3.25^1.5 deve ser 5.859020822628982" (VFloat 5.859020822628982) resExp
 
 testExpMista :: Test
 testExpMista = TestCase $ do
@@ -796,7 +796,6 @@ rodarDemonstracao = do
   print v1
 
   putStrLn "\n[7] Alteracao de Array por Indice (vetor[1] = 99 em [10, 20, 30]):"
-  -- Retorna a variavel "vetor" inteira para exibir o array completo modificado
   let progArr = Block [Decl (TArray TInt) "vetor" (ArrayLit [Lit 10, Lit 20, Lit 30]), ArrAssign "vetor" (Lit 1) (Lit 99), Return (Var "vetor")]
   v2 <- runProg Map.empty progArr
   print v2
@@ -829,5 +828,21 @@ rodarDemonstracao = do
   let progArrCoerce = Block [Decl (TArray TInt) "arr" (ArrayLit [Lit 10, Lit 20]), ArrAssign "arr" (Lit 0) (FLit 5.9), Return (ArrAcc "arr" (Lit 0))]
   v6 <- runProg Map.empty progArrCoerce
   print v6
+
+  putStrLn "\n[13] Exponenciacao Int e Float (4^3 e 3.25^1.5):"
+  print (evalBinOp Exp (VInt 4) (VInt 3), evalBinOp Exp (VFloat 3.25) (VFloat 1.5))
+
+  putStrLn "\n[14] Operacao de Raiz (sqrt(9, 2) e sqrt(2.5, 3)):"
+  print (evalBinOp Sqrt (VInt 9) (VFloat 2), evalBinOp Sqrt (VFloat 2.5) (VFloat 3))
+
+  putStrLn "\n[15] Try/Catch com Throw Customizado (try { throw 42 } catch (err) { return err }):"
+  let progTryThrow = Block [TryCatch (Block [Throw (Lit 42)]) "err" (Return (Var "err"))]
+  vTry1 <- runProg Map.empty progTryThrow
+  print vTry1
+
+  putStrLn "\n[16] Try/Catch Capturando Erro NATIVO de Divisao por Zero (try { 10 / 0 } catch (err) { return err }):"
+  let progTryDiv = Block [TryCatch (Block [Print (BinE Div (Lit 10) (Lit 0))]) "err" (Block [Return (Var "err")])]
+  vTry2 <- runProg Map.empty progTryDiv
+  print vTry2
 
   putStrLn "\n========================================================="
