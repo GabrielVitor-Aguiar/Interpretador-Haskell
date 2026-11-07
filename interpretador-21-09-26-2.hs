@@ -57,6 +57,7 @@ data Stmt
   | Throw Expr                 -- throw error
   | TryCatch Stmt String Stmt    -- try { ... } catch (e) { ... }
   | Skip
+  | Switch Expr [(Expr, Stmt)] (Maybe Stmt) -- caso alvo (Expr), lista de cases ( [(Expr, Stmt)] ), caso Default ( Maybe Stmt ) o "Maybe" deixa ele opcional
   deriving (Show, Eq)
 
 data FunDecl = FunDecl
@@ -308,6 +309,23 @@ execStmt fenv env stmt = case stmt of
       VBool False -> execStmt fenv env f
       _           -> error "Condição do If não é booleana"
 
+  Switch cond casos defaultStmt -> do     -- Switch/case
+    v <- evalExpr fenv env cond
+    
+    -- função que procura pelos casos
+    let procurarCaso [] currentEnv = case defaultStmt of -- caso de quando todos os cases são percorridos e nenhum bate
+            Just def -> execStmt fenv currentEnv def     -- se um case Default existe, executa ele
+            Nothing  -> return (Next currentEnv)
+            
+        procurarCaso ((valExpr, stmt):rest) currentEnv = do   -- percorre cada case
+            vVal <- evalExpr fenv currentEnv valExpr          -- guarda a expressão em vVal para checar com o v original e ver se o case bate
+            if v == vVal
+                then execStmt fenv currentEnv stmt            -- executa o case pois bateu com a expressão original
+                else procurarCaso rest currentEnv             -- passa pro proximo case e continua testando
+
+    procurarCaso casos env    -- procura nos casos a variável dada por env
+    
+
   Return e -> do
     v <- evalExpr fenv env e
     return (Returned v env)
@@ -454,7 +472,9 @@ fenvExemplo = Map.fromList
 -- Programas de teste
 -- ============================================================
 
--- int x = 10; int y = 3; retorna x + y;
+-- int x = 10;
+-- int y = 3;
+-- retorna x + y;
 prog1 :: Stmt
 prog1 = Block
   [ Decl TInt "x" (Lit 10)
@@ -462,7 +482,11 @@ prog1 = Block
   , Return (BinE Add (Var "x") (Var "y"))
   ]
 
--- int n = 7; se (n > 5) retorna verdadeiro senao retorna falso
+
+
+-- int n = 7;
+-- se (n > 5) retorna verdadeiro
+-- senao retorna falso
 prog2 :: Stmt
 prog2 = Block
   [ Decl TInt "n" (Lit 7)
@@ -471,7 +495,14 @@ prog2 = Block
        (Return (BLit False))
   ]
 
--- int i = 0; enquanto (i < 3) { i = i + 1; } retorna i;
+
+
+-- int i = 0;
+-- enquanto (i < 3)
+-- {
+--     i = i + 1;
+-- }
+-- retorna i;
 prog3 :: Stmt
 prog3 = Block
   [ Decl TInt "i" (Lit 0)
@@ -480,22 +511,32 @@ prog3 = Block
   , Return (Var "i")
   ]
 
+
 -- retorna dobro(5)
 prog4 :: Stmt
 prog4 = Return (Call "dobro" [Lit 5])
+
 
 -- retorna fatorial(5)
 prog5 :: Stmt
 prog5 = Return (Call "fatorial" [Lit 5])
 
--- int x = 4; retorna soma(dobro(x), 3)
+
+-- int x = 4; 
+-- retorna soma(dobro(x), 3)
 prog6 :: Stmt
 prog6 = Block
   [ Decl TInt "x" (Lit 4)
   , Return (Call "soma" [Call "dobro" [Var "x"], Lit 3])
   ]
 
--- int i = 0; enquanto (i < 3) { imprime(i); i = i + 1; }
+
+
+-- int i = 0;
+-- enquanto (i < 3) 
+-- {
+--     imprime(i); i = i + 1;
+-- }
 prog7 :: Stmt
 prog7 = Block
   [ Decl TInt "i" (Lit 0)
@@ -506,9 +547,30 @@ prog7 = Block
         ])
   ]
 
+
 -- imprime(dobro(4))
 prog8 :: Stmt
 prog8 = Print (Call "dobro" [Lit 4])
+
+
+
+-- int opcao = 2;
+-- switch (opcao) {
+--     case 1: imprime("Um");
+--     case 2: imprime("Dois");
+--     default: imprime("Outro");
+-- }
+prog9 :: Stmt
+prog9 = Block
+  [ Decl TInt "opcao" (Lit 2)
+  , Switch (Var "opcao")
+      [ (Lit 1, Print (SLit "Um"))
+      , (Lit 2, Print (SLit "Dois"))
+      , (Lit 3, Print (SLit "Tres"))
+      ]
+      (Just (Print (SLit "Desconhecido")))
+  , Return (Var "opcao")
+  ]
 
 -- ============================================================
 -- Suite de testes HUnit
@@ -557,6 +619,11 @@ testImprimeCallDobro :: Test
 testImprimeCallDobro = TestCase $ do
   output <- runProgIO fenvExemplo prog8
   assertEqual "imprime dobro(4)" "8\n" output
+
+testSwitch :: Test
+testSwitch = TestCase $ do
+  output <- runProgIO Map.empty prog9
+  assertEqual "imprimir 'Dois' dentre Um, Dois e Três" "\"Dois\"\n" output
 
 testSomaFloatSimples :: Test
 testSomaFloatSimples = TestCase $ do
@@ -760,6 +827,7 @@ suite = TestList
   , TestLabel "chamada aninhada"     testChamadaAninhada
   , TestLabel "while imprime"        testWhileImprime
   , TestLabel "imprime call dobro"   testImprimeCallDobro
+  , TestLabel "teste de switch"      testSwitch
   ]
 
 main :: IO ()
