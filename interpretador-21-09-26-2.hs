@@ -79,7 +79,7 @@ data Value
   | VBool Bool
   | VFloat Double
   | VArray [Value]
-  | VString String -- Nico: Implementando Unicamente para o caso de erro, para que seja possivel imprimir o valor do erro.
+  | VString String
   | VVoid
   deriving (Show, Eq)
 
@@ -466,7 +466,7 @@ runProg fenv prog =
           Next _       -> return VVoid
           Thrown v _   -> error ("Erro nao capturado: " ++ showValue v))
     (\(ThrowVal v) -> error ("Erro nao capturado: " ++ showValue v))
-    
+
 -- Executa um programa e captura tudo que foi impresso via Print
 runProgIO :: FunEnv -> Stmt -> IO String
 runProgIO fenv prog =
