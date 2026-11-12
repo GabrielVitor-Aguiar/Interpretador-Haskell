@@ -30,6 +30,7 @@ data BinOp
   = Add | Sub | Mul | Div | Mod | Exp | Sqrt
   | Eq  | Neq | Lt  | Gt  | Le | Ge
   | And | Or
+  | Concat
   deriving (Show, Eq)
 
 data Expr 
@@ -43,6 +44,8 @@ data Expr
   | Call  String [Expr]
   | ArrAcc String Expr
   | ArrayLit [Expr]
+  | Len Expr
+  | ToStr Expr
   deriving (Show, Eq)
 
 data Stmt
@@ -122,12 +125,27 @@ evalExpr fenv env expr = case expr of
         if idx >= 0 && idx < length vals
           then return (vals !! idx)
           else error ("Indice fora dos limites do array: " ++ show idx)
+      (VString s, VInt idx) ->
+        if idx >= 0 && idx < length s
+          then return (VString [s !! idx])
+          else error ("Indice fora dos limites da string: " ++ show idx)
       (VArray _, _) -> error "Indice de array deve ser do tipo Int"
       _             -> error ("A variavel " ++ arrName ++ " nao eh um array")
 
   ArrayLit exprs -> do
     vals <- mapM (evalExpr fenv env) exprs
     return (VArray vals)
+
+  Len e -> do -- retorna o tamanho de uma string ou array
+    v <- evalExpr fenv env e
+    case v of
+      VString s -> return (VInt (length s))
+      VArray xs -> return (VInt (length xs))
+      _         -> error "Len aplicado a nao-array ou nao-string"
+
+  ToStr e -> do -- converte qualquer valor para string
+    v <- evalExpr fenv env e
+    return (VString (printValue v))
 
   Not e -> do
     v <- evalExpr fenv env e
@@ -151,8 +169,10 @@ evalExpr fenv env expr = case expr of
                     show nargs)
         else do
           vals <- mapM (evalExpr fenv env) args
-          let params   = map snd (funParams fun)
-              envLocal = Map.fromList (zip params vals)
+          let types   = map fst (funParams fun)
+              vals' = zipWith coerceValue types vals
+              params   = map snd (funParams fun)
+              envLocal = Map.fromList (zip params vals')
               envFun   = Map.union envLocal env
           result <- execStmt fenv envFun (funBody fun)
           case result of
@@ -233,6 +253,17 @@ evalBinOp Ge  (VFloat a) (VInt   b) = VBool (a >= fromIntegral b)
 evalBinOp And (VBool  a) (VBool  b) = VBool (a && b)
 evalBinOp Or  (VBool  a) (VBool  b) = VBool (a || b)
 
+-- Strings
+evalBinOp Concat (VString a) (VString b) = VString (a ++ b) -- Concatenação de strings
+evalBinOp Concat a b = VString (printValue a ++ printValue b) -- Concatenação de strings com outros tipos, convertendo-os para string
+
+-- Ordenação em strings
+evalBinOp Lt  (VString a) (VString b) = VBool (a <  b)
+evalBinOp Gt  (VString a) (VString b) = VBool (a >  b)
+evalBinOp Le  (VString a) (VString b) = VBool (a <= b)
+evalBinOp Ge  (VString a) (VString b) = VBool (a >= b)
+
+-- Caso padrão para operações inválidas ou tipos incompatíveis
 evalBinOp op  _         _         =
   error ("Operacao invalida ou tipos incompativeis: " ++ show op)
 
@@ -245,8 +276,9 @@ valueType :: Value -> Type
 valueType (VInt _)    = TInt
 valueType (VFloat _)  = TFloat
 valueType (VBool _)   = TBool
-valueType (VArray _)  = TArray TVoid
-valueType (VString _) = TString -- Nico: Implementando Unicamente para o caso de erro, para que seja possivel imprimir o valor do erro.
+valueType (VArray (x:_))  = TArray (valueType x)
+valueType (VArray [])     = TArray TVoid -- Caso de array vazio, não há elementos para inferir o tipo, então usamos TVoid como tipo genérico.
+valueType (VString _) = TString
 valueType VVoid       = TVoid
 
 -- Converte um valor para o tipo esperado
@@ -256,9 +288,11 @@ coerceValue TInt   (VFloat f)          = VInt (truncate f)
 coerceValue TFloat (VFloat f)          = VFloat f
 coerceValue TFloat (VInt n)            = VFloat (fromIntegral n)
 coerceValue TBool  (VBool b)           = VBool b
-coerceValue (TArray _) (VArray vals)   = VArray vals
+coerceValue (TArray t) (VArray vals)
+  | t == TVoid = VArray vals -- Permite arrays vazios de qualquer tipo
+  | otherwise = VArray (map (coerceValue t) vals) -- Coerção de cada elemento do array para o tipo esperado
 coerceValue TString (VString s)         = VString s
-coerceValue targetType val             = error ("Tipos incompativeis: não é possivel atribuir " ++ show val ++ " para o tipo " ++ show targetType)
+coerceValue targetType val             = error ("Tipos incompativeis: esperado " ++ show targetType ++ ", mas recebeu " ++ show (valueType val))
 
 execStmt :: FunEnv -> Env -> Stmt -> IO StmtResult
 execStmt fenv env stmt = case stmt of
@@ -268,13 +302,13 @@ execStmt fenv env stmt = case stmt of
 
   Print e -> do
     v <- evalExpr fenv env e
-    putStrLn (showValue v)
+    putStrLn (printValue v)
     return (Next env)
 
   Decl t x e -> do
     v <- evalExpr fenv env e
     let vCoerced = coerceValue t v
-    vCoerced `seq` return (Next (Map.insert x vCoerced env))
+    deepForce vCoerced `seq` return (Next (Map.insert x vCoerced env))
 
   Assign x e -> case Map.lookup x env of
     Nothing -> error ("Variavel não declarada: " ++ x)
@@ -282,7 +316,7 @@ execStmt fenv env stmt = case stmt of
       v <- evalExpr fenv env e
       let targetType = valueType currentVal
           vCoerced   = coerceValue targetType v
-      vCoerced `seq` return (Next (Map.insert x vCoerced env))
+      deepForce vCoerced `seq` return (Next (Map.insert x vCoerced env))
 
   ArrAssign arrName idxExpr valExpr -> do
     vArr <- evalExpr fenv env (Var arrName)
@@ -297,7 +331,7 @@ execStmt fenv env stmt = case stmt of
                 vCoerced    = coerceValue elemType vVal
                 (before, _:after) = splitAt idx vals
                 newVals     = before ++ [vCoerced] ++ after
-            vCoerced `seq` return (Next (Map.insert arrName (VArray newVals) env))
+            deepForce vCoerced `seq` return (Next (Map.insert arrName (VArray newVals) env))
           else error ("Indice fora dos limites do array: " ++ show idx)
       (VArray _, _) -> error "Indice de array deve ser do tipo Int"
       _             -> error ("A variavel " ++ arrName ++ " não é um array")
@@ -387,8 +421,20 @@ showValue (VArray xs) = "[" ++ showListValues xs ++ "]"
     showListValues [v]    = showValue v
     showListValues (v:vs) = showValue v ++ ", " ++ showListValues vs
     
-showValue (VString s) = "\"" ++ s ++ "\""
+showValue (VString s) = show s
 showValue VVoid     = "()"
+
+printValue :: Value -> String
+printValue (VString s) = s
+printValue v = showValue v
+-- Força um Value até o fundo (arrays inclusos), para que erros de coerção apareçam na hora da declaração/atribuição e não só quando o valor é lido.
+deepForce :: Value -> ()
+deepForce (VInt n)    = n `seq` ()
+deepForce (VFloat f)  = f `seq` ()
+deepForce (VBool b)   = b `seq` ()
+deepForce (VString s) = length s `seq` ()
+deepForce (VArray xs) = foldr (\v acc -> deepForce v `seq` acc) () xs
+deepForce VVoid       = ()
 
 -- ============================================================
 -- Auxiliares para testes
@@ -623,7 +669,7 @@ testImprimeCallDobro = TestCase $ do
 testSwitch :: Test
 testSwitch = TestCase $ do
   output <- runProgIO Map.empty prog9
-  assertEqual "imprimir 'Dois' dentre Um, Dois e Três" "\"Dois\"\n" output
+  assertEqual "imprimir 'Dois' dentre Um, Dois e Três" "Dois\n" output
 
 testSomaFloatSimples :: Test
 testSomaFloatSimples = TestCase $ do
@@ -794,6 +840,110 @@ testTryCatchDivZero = TestCase $ do
   v <- runProg Map.empty prog
   assertEqual "TryCatch deve capturar erro de divisao por zero" (VString "divide by zero") v
   
+-- ===== Strings =====
+
+testConcatStrings :: Test
+testConcatStrings = TestCase $ do
+  v <- evalExpr Map.empty Map.empty (BinE Concat (SLit "ola") (SLit " mundo"))
+  assertEqual "concatenacao de strings" (VString "ola mundo") v
+
+testConcatAcumulada :: Test
+testConcatAcumulada = TestCase $ do
+  let prog = Block
+        [ Decl TString "s" (SLit "")
+        , Assign "s" (BinE Concat (Var "s") (SLit "abc"))
+        , Assign "s" (BinE Concat (Var "s") (SLit "!"))
+        , Return (Var "s")
+        ]
+  v <- runProg Map.empty prog
+  assertEqual "string vazia + abc + !" (VString "abc!") v
+
+testLenString :: Test
+testLenString = TestCase $ do
+  v <- evalExpr Map.empty Map.empty (Len (SLit "haskell"))
+  assertEqual "tamanho de haskell" (VInt 7) v
+
+testLenStringVazia :: Test
+testLenStringVazia = TestCase $ do
+  v <- evalExpr Map.empty Map.empty (Len (SLit ""))
+  assertEqual "tamanho de string vazia" (VInt 0) v
+
+testLenArray :: Test
+testLenArray = TestCase $ do
+  v <- evalExpr Map.empty Map.empty (Len (ArrayLit [Lit 1, Lit 2, Lit 3]))
+  assertEqual "tamanho do array" (VInt 3) v
+
+testComparacaoString :: Test
+testComparacaoString = TestCase $ do
+  vLt <- evalExpr Map.empty Map.empty (BinE Lt (SLit "abc") (SLit "abd"))
+  vGt <- evalExpr Map.empty Map.empty (BinE Gt (SLit "zebra") (SLit "abelha"))
+  vEq <- evalExpr Map.empty Map.empty (BinE Eq (SLit "igual") (SLit "igual"))
+  assertEqual "abc < abd"       (VBool True) vLt
+  assertEqual "zebra > abelha"  (VBool True) vGt
+  assertEqual "igual == igual"  (VBool True) vEq
+
+testToStr :: Test
+testToStr = TestCase $ do
+  let prog = Block
+        [ Decl TInt "n" (Lit 42)
+        , Return (BinE Concat (ToStr (Var "n")) (SLit "!"))
+        ]
+  v <- runProg Map.empty prog
+  assertEqual "ToStr de 42" (VString "42!") v
+
+testToStrNaoAdicionaAspas :: Test
+testToStrNaoAdicionaAspas = TestCase $ do
+  v <- evalExpr Map.empty Map.empty (ToStr (SLit "oi"))
+  assertEqual "ToStr de string nao adiciona aspas" (VString "oi") v
+
+testPrintString :: Test
+testPrintString = TestCase $ do
+  out <- runProgIO Map.empty (Print (SLit "Oi"))
+  assertEqual "Print imprime string sem aspas" "Oi\n" out
+
+testShowValueEscapa :: Test
+testShowValueEscapa = TestCase $ do
+  assertEqual "showValue escapa aspas internas"
+    "\"a\\\"b\"" (showValue (VString "a\"b"))
+
+testSwitchString :: Test
+testSwitchString = TestCase $ do
+  let prog = Block
+        [ Decl TString "cor" (SLit "verde")
+        , Switch (Var "cor")
+            [ (SLit "azul",  Print (SLit "frio"))
+            , (SLit "verde", Print (SLit "natureza"))
+            ]
+            (Just (Print (SLit "outra")))
+        ]
+  out <- runProgIO Map.empty prog
+  assertEqual "switch com rotulos string" "natureza\n" out
+
+testStringEmArray :: Test
+testStringEmArray = TestCase $ do
+  let prog = Block
+        [ Decl (TArray TString) "nomes" (ArrayLit [SLit "ana", SLit "bia"])
+        , Return (ArrAcc "nomes" (Lit 1))
+        ]
+  v <- runProg Map.empty prog
+  assertEqual "acesso a string no array" (VString "bia") v
+
+testStringEmIntFalha :: Test
+testStringEmIntFalha = TestCase $ do
+  r <- E.catch (runProg Map.empty (Decl TInt "x" (SLit "a")) >> return "OK")
+               (\(E.SomeException _) -> return "ERRO")
+  assertEqual "string nao pode ser atribuida a int" "ERRO" r
+
+testParametroCoercao :: Test
+testParametroCoercao = TestCase $ do
+  v <- runProg fenvExemplo (Return (Call "dobro" [FLit 5.9]))
+  assertEqual "parametro int trunca float 5.9 para 5, dobro = 10" (VInt 10) v
+
+testArrayCoercaoEstrita :: Test
+testArrayCoercaoEstrita = TestCase $ do
+  r <- E.catch (runProg Map.empty (Decl (TArray TInt) "a" (ArrayLit [SLit "x"])) >> return "OK")
+               (\(E.SomeException _) -> return "ERRO")
+  assertEqual "array de int com string deve falhar na declaracao" "ERRO" r
 
 -- suite completa
 
@@ -828,6 +978,21 @@ suite = TestList
   , TestLabel "while imprime"        testWhileImprime
   , TestLabel "imprime call dobro"   testImprimeCallDobro
   , TestLabel "teste de switch"      testSwitch
+    , TestLabel "concat strings"        testConcatStrings
+  , TestLabel "concat acumulada"      testConcatAcumulada
+  , TestLabel "len string"            testLenString
+  , TestLabel "len string vazia"      testLenStringVazia
+  , TestLabel "len array"             testLenArray
+  , TestLabel "comparacao strings"    testComparacaoString
+  , TestLabel "toStr"                 testToStr
+  , TestLabel "toStr sem aspas"       testToStrNaoAdicionaAspas
+  , TestLabel "print string"          testPrintString
+  , TestLabel "showValue escapa"      testShowValueEscapa
+  , TestLabel "switch string"         testSwitchString
+  , TestLabel "string em array"       testStringEmArray
+  , TestLabel "string em int falha"   testStringEmIntFalha
+  , TestLabel "coercao de parametro"  testParametroCoercao
+  , TestLabel "coercao estrita array" testArrayCoercaoEstrita
   ]
 
 main :: IO ()
@@ -883,8 +1048,9 @@ rodarDemonstracao = do
   print v4
 
   putStrLn "\n[10] Rejeicao de Tipo Incompativel (int x = verdadeiro):"
-  resErr <- E.catch (runProg Map.empty (Decl TInt "x" (BLit True)) >> return "SUCESSO (Incorreto)")
-                    (\(E.SomeException _) -> return "REJEITADO COM ERRO (Correto)")
+  resErr <- E.catch (runProg Map.empty (Decl TInt "x" (SLit "a")) >> return "OK")
+        (\(E.SomeException e) -> return (show e))
+-- "Tipos incompativeis: não é possivel atribuir \"a\" para o tipo TInt"
   putStrLn resErr
 
   putStrLn "\n[11] Reatribuicao com Coercao via Assign (float a = 1.0; a = 10; int b = 0; b = 7.9; return a + b):"
@@ -912,5 +1078,21 @@ rodarDemonstracao = do
   let progTryDiv = Block [TryCatch (Block [Print (BinE Div (Lit 10) (Lit 0))]) "err" (Block [Return (Var "err")])]
   vTry2 <- runProg Map.empty progTryDiv
   print vTry2
+
+  putStrLn "\n[17] Concatenacao de Strings:"
+  print =<< evalExpr Map.empty Map.empty
+             (BinE Concat (SLit "Ola, ") (ToStr (Lit 42)))
+
+  putStrLn "\n[18] Tamanho e Comparacao:"
+  print =<< evalExpr Map.empty Map.empty (Len (SLit "interpretador"))
+  print =<< evalExpr Map.empty Map.empty (BinE Lt (SLit "abc") (SLit "abd"))
+
+  putStrLn "\n[19] String Vinda de Erro (try/catch):"
+  vErr <- runProg Map.empty
+             (Block [ TryCatch
+                        (Block [Print (BinE Div (Lit 1) (Lit 0))])
+                        "err"
+                        (Return (Var "err")) ])
+  print vErr
 
   putStrLn "\n========================================================="
