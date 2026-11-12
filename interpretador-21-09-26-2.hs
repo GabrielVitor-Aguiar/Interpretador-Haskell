@@ -99,6 +99,10 @@ data StmtResult
   | Thrown  Value Env
   deriving (Show)
 
+newtype ThrowVal = ThrowVal Value
+instance Show ThrowVal where show (ThrowVal v) = showValue v
+instance E.Exception ThrowVal
+
 -- ============================================================
 -- Avaliação de Expressões 
 -- ============================================================
@@ -178,7 +182,7 @@ evalExpr fenv env expr = case expr of
           case result of
             Returned v _ -> return v
             Next _       -> return VVoid
-            Thrown errVal _ -> error ("Erro na funcao " ++ fname ++ ": " ++ show errVal)
+            Thrown errVal _ -> E.throwIO (ThrowVal errVal) -- Propaga o erro para o chamador
 
 -- ============================================================
 -- evalBinOp — permanece pura
@@ -362,7 +366,7 @@ execStmt fenv env stmt = case stmt of
 
   Return e -> do
     v <- evalExpr fenv env e
-    return (Returned v env)
+    deepForce v `seq` return (Returned v env)
 
   Block stmts ->
     execBlock fenv env stmts
@@ -378,13 +382,20 @@ execStmt fenv env stmt = case stmt of
           Next        env' -> execStmt fenv env' (While cond body)
           Thrown errVal env' -> return (Thrown errVal env')
       _ -> error "Condiçãoo do While não é booleana"
+  
   Throw e -> do
     v <- evalExpr fenv env e
-    return (Thrown v env) -- Retorna um valor de erro
+    deepForce v `seq` return (Thrown v env) -- Retorna um valor de erro
   
   TryCatch tryBlock errVar catchBlock -> do
-    r <- E.catch (execStmt fenv env tryBlock)
-                 (\(E.SomeException ex) -> return (Thrown (VString (show ex)) env))
+    let handler :: E.SomeException -> IO StmtResult
+        handler ex = case E.fromException ex of
+          Just (ThrowVal v) -> return (Thrown v env)             -- preserva o valor/tipo
+          Nothing -> case E.fromException ex :: Maybe E.AsyncException of
+            Just _  -> E.throwIO ex                              -- não engole Ctrl+C
+            Nothing -> return (Thrown (VString (exMessage ex)) env)
+
+    r <- E.catch (execStmt fenv env tryBlock) handler
     case r of
       -- Se um erro foi lançado, insere o valor do erro no ambiente e executa o bloco de captura
       Thrown errVal env' -> do
@@ -427,6 +438,11 @@ showValue VVoid     = "()"
 printValue :: Value -> String
 printValue (VString s) = s
 printValue v = showValue v
+
+-- Mensagem da exceção sem o CallStack do GHC
+exMessage :: E.SomeException -> String
+exMessage = takeWhile (/= '\n') . E.displayException
+
 -- Força um Value até o fundo (arrays inclusos), para que erros de coerção apareçam na hora da declaração/atribuição e não só quando o valor é lido.
 deepForce :: Value -> ()
 deepForce (VInt n)    = n `seq` ()
@@ -442,12 +458,15 @@ deepForce VVoid       = ()
 
 -- Executa um programa e extrai o valor retornado via Return
 runProg :: FunEnv -> Stmt -> IO Value
-runProg fenv prog = do
-  result <- execStmt fenv Map.empty prog
-  case result of
-    Returned v _ -> return v
-    Next _       -> return VVoid
-
+runProg fenv prog =
+  E.catch
+    (do result <- execStmt fenv Map.empty prog
+        case result of
+          Returned v _ -> return v
+          Next _       -> return VVoid
+          Thrown v _   -> error ("Erro nao capturado: " ++ showValue v))
+    (\(ThrowVal v) -> error ("Erro nao capturado: " ++ showValue v))
+    
 -- Executa um programa e captura tudo que foi impresso via Print
 runProgIO :: FunEnv -> Stmt -> IO String
 runProgIO fenv prog =
@@ -945,6 +964,24 @@ testArrayCoercaoEstrita = TestCase $ do
                (\(E.SomeException _) -> return "ERRO")
   assertEqual "array de int com string deve falhar na declaracao" "ERRO" r
 
+testThrowAtravessaFuncao :: Test
+testThrowAtravessaFuncao = TestCase $ do
+  let fenv = Map.singleton "erro" (FunDecl "erro" [] (Throw (Lit 42)))
+  v <- runProg fenv
+         (Block [ TryCatch (Block [Return (Call "erro" [])])
+                            "e"
+                            (Return (Var "e")) ])
+  assertEqual "throw atravessa funcao preservando o valor" (VInt 42) v
+
+testMensagemSemCallStack :: Test
+testMensagemSemCallStack = TestCase $ do
+  v <- runProg Map.empty
+         (Block [ TryCatch (Block [Print (Var "naoExiste")])
+                            "e"
+                            (Return (Var "e")) ])
+  assertEqual "mensagem nativa sem CallStack"
+    (VString "Variavel nao declarada: naoExiste") v
+
 -- suite completa
 
 suite :: Test
@@ -978,7 +1015,7 @@ suite = TestList
   , TestLabel "while imprime"        testWhileImprime
   , TestLabel "imprime call dobro"   testImprimeCallDobro
   , TestLabel "teste de switch"      testSwitch
-    , TestLabel "concat strings"        testConcatStrings
+  , TestLabel "concat strings"        testConcatStrings
   , TestLabel "concat acumulada"      testConcatAcumulada
   , TestLabel "len string"            testLenString
   , TestLabel "len string vazia"      testLenStringVazia
@@ -993,6 +1030,8 @@ suite = TestList
   , TestLabel "string em int falha"   testStringEmIntFalha
   , TestLabel "coercao de parametro"  testParametroCoercao
   , TestLabel "coercao estrita array" testArrayCoercaoEstrita
+  , TestLabel "throw atravessa funcao" testThrowAtravessaFuncao
+  , TestLabel "mensagem sem CallStack" testMensagemSemCallStack
   ]
 
 main :: IO ()
